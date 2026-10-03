@@ -118,7 +118,7 @@ function Empty({ title, detail }: { title: string; detail: string }) {
 function Loading() { return <div className="loading"><Skeleton className="size-5 rounded-full" /> در حال دریافت اطلاعات…</div> }
 
 function PageHeader({ title, subtitle, children }: { title: string; subtitle: string; children?: React.ReactNode }) {
-  return <div className="page-header"><div><p className="eyebrow">فَرا رویداد</p><h1>{title}</h1><p>{subtitle}</p></div>{children && <div className="page-actions">{children}</div>}</div>
+  return <header className="page-header"><div className="page-heading"><p className="eyebrow">فضای مدیریت رویداد</p><h1>{title}</h1><p>{subtitle}</p></div>{children && <div className="page-actions">{children}</div>}</header>
 }
 
 function AuthScreen({ onAuthenticated }: { onAuthenticated: (session: Session) => void }) {
@@ -323,7 +323,37 @@ function Shell({ session, onSessionChange }: { session: Session; onSessionChange
   function navigate(next: Page) { location.hash = next; setPage(next); setMobileOpen(false) }
   async function logout() { try { await api('/auth/logout', { method: 'POST' }) } finally { localStorage.removeItem('eventhub_token'); sessionStorage.removeItem('eventhub_token'); onSessionChange(null) } }
   const current = useMemo(() => { const props = { user: session.user }; if (page === 'events') return <EventsPage {...props} />; if (page === 'registrations') return <RegistrationsPage {...props} />; if (page === 'people' && staff) return <PeoplePage {...props} />; if (page === 'vouchers') return <VouchersPage {...props} />; if (page === 'attendance' && staff) return <AttendancePage />; if (page === 'certificates') return <CertificatesPage {...props} />; if (page === 'reports' && staff) return <ReportsPage />; if (page === 'profile') return <ProfilePage user={session.user} onUpdated={(user) => onSessionChange({ ...session, user })} />; return <DashboardPage {...props} /> }, [page, session, staff, onSessionChange])
-  return <main className="app-shell"><Button variant="outline" size="icon" className="mobile-menu" onClick={() => setMobileOpen(!mobileOpen)} aria-label="باز کردن منو"><Menu size={21} /></Button><aside className={`sidebar ${mobileOpen ? 'open' : ''}`}><div className="brand"><div className="brand-mark"><Sparkles size={21} /></div><div><strong>فَرا رویداد</strong><span>مدیریت رویداد علمی</span></div></div><div className="profile-card"><Avatar className="profile-avatar"><AvatarFallback>{session.user.name.slice(0, 1)}</AvatarFallback></Avatar><div><b>{session.user.name}</b><span>{roleTitle(session.user.role)}</span></div></div><nav>{navigation.filter((item) => !item.staff || staff).map(({ page: target, label, icon: Icon }) => <Button key={target} variant={page === target ? 'secondary' : 'ghost'} className={`nav-item ${page === target ? 'active' : ''}`} onClick={() => navigate(target)}><Icon size={18} />{label}</Button>)}</nav><Button variant="ghost" className="logout" onClick={() => void logout()}><LogOut size={18} /> خروج از حساب</Button></aside><section className="workspace"><header className="topbar"><span className="topbar-title">{navigation.find((item) => item.page === page)?.label ?? 'نمای کلی'}</span><span className="topbar-user"><UserRound size={17} /> {session.user.name}</span></header><div className="content">{current}</div></section></main>
+  const currentLabel = navigation.find((item) => item.page === page)?.label ?? 'نمای کلی'
+  const visibleNavigation = navigation.filter((item) => !item.staff || staff)
+
+  return <main className="app-shell">
+    <Button variant="outline" size="icon" className="mobile-menu" onClick={() => setMobileOpen(!mobileOpen)} aria-label="باز کردن منو"><Menu size={19} /></Button>
+    <aside className={`sidebar ${mobileOpen ? 'open' : ''}`}>
+      <div className="brand">
+        <div className="brand-mark"><Sparkles size={16} /></div>
+        <div><strong>فَرا رویداد</strong><span>مدیریت رویدادهای علمی</span></div>
+      </div>
+      <div className="profile-card">
+        <Avatar className="profile-avatar"><AvatarFallback>{session.user.name.slice(0, 1)}</AvatarFallback></Avatar>
+        <div><b>{session.user.name}</b><span>{roleTitle(session.user.role)}</span></div>
+      </div>
+      <p className="nav-caption">فضای کاری</p>
+      <nav aria-label="ناوبری اصلی">
+        {visibleNavigation.map(({ page: target, label, icon: Icon }) => <Button key={target} variant={page === target ? 'secondary' : 'ghost'} className={`nav-item ${page === target ? 'active' : ''}`} onClick={() => navigate(target)}><Icon size={16} />{label}</Button>)}
+      </nav>
+      <div className="sidebar-footer">
+        <Button variant="ghost" className="logout" onClick={() => void logout()}><LogOut size={16} /> خروج از حساب</Button>
+        <span>EventHub · 2026</span>
+      </div>
+    </aside>
+    <section className="workspace">
+      <header className="topbar">
+        <div className="topbar-title"><span>فضای مدیریت</span><strong>{currentLabel}</strong></div>
+        <div className="topbar-user"><span>{roleTitle(session.user.role)}</span><Avatar className="topbar-avatar"><AvatarFallback>{session.user.name.slice(0, 1)}</AvatarFallback></Avatar></div>
+      </header>
+      <div className="content">{current}</div>
+    </section>
+  </main>
 }
 
 export default function App() {
