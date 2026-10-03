@@ -13,6 +13,7 @@ class DashboardApiTest extends TestCase
     public function test_returns_401_when_dashboard_token_is_missing(): void
     {
         $this->getJson('/api/dashboard')->assertUnauthorized();
+        $this->get('/api/dashboard')->assertUnauthorized();
     }
 
     public function test_returns_empty_staff_dashboard_when_no_event_exists(): void
