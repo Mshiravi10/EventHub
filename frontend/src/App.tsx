@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { LucideIcon } from 'lucide-react'
+import conferenceImage from './assets/auth-conference.png'
 import {
   Award,
   BadgeCheck,
   Building2,
   CalendarDays,
   ChartNoAxesCombined,
-  Check,
-  ChevronLeft,
   CircleAlert,
   ClipboardCheck,
   LayoutDashboard,
@@ -28,7 +27,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -57,8 +56,19 @@ class ApiError extends Error {
   }
 }
 
+function getStoredToken(): string | null {
+  return localStorage.getItem('eventhub_token') ?? sessionStorage.getItem('eventhub_token')
+}
+
+function normalizeDigits(value: string): string {
+  const persian = '۰۱۲۳۴۵۶۷۸۹'
+  const arabic = '٠١٢٣٤٥٦٧٨٩'
+
+  return value.replace(/[۰-۹]/g, (digit) => String(persian.indexOf(digit))).replace(/[٠-٩]/g, (digit) => String(arabic.indexOf(digit)))
+}
+
 async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = localStorage.getItem('eventhub_token')
+  const token = getStoredToken()
   const headers = new Headers(options.headers)
   headers.set('Accept', 'application/json')
   if (options.body) headers.set('Content-Type', 'application/json')
@@ -119,18 +129,87 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (session: Session) =
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
+    const requestData = Object.fromEntries(form.entries())
+    for (const field of ['phone', 'national_code']) {
+      if (typeof requestData[field] === 'string') requestData[field] = normalizeDigits(requestData[field])
+    }
     setBusy(true); setMessage('')
     try {
       const payload = await api<Session>(mode === 'login' ? '/auth/login' : '/auth/register', {
         method: 'POST',
-        body: JSON.stringify(Object.fromEntries(form.entries())),
+        body: JSON.stringify(requestData),
       })
-      localStorage.setItem('eventhub_token', payload.token)
+      localStorage.removeItem('eventhub_token')
+      sessionStorage.removeItem('eventhub_token')
+      const shouldRemember = mode === 'register' || form.get('remember') === 'on'
+      ;(shouldRemember ? localStorage : sessionStorage).setItem('eventhub_token', payload.token)
       onAuthenticated(payload)
     } catch (reason) { setMessage(getError(reason)) } finally { setBusy(false) }
   }
 
-  return <main className="auth-screen"><section className="auth-aside"><div className="brand big"><div className="brand-mark"><Sparkles size={25} /></div><div><strong>فَرا رویداد</strong><span>سامانه مدیریت رویداد علمی</span></div></div><div className="auth-copy"><Badge variant="secondary" className="w-fit bg-primary/15 text-blue-100 hover:bg-primary/15">مدیریت یکپارچه</Badge><h1>از ثبت‌نام تا گواهی، در یک سامانه.</h1><p>رویدادها، شرکت‌کنندگان، حضور و غیاب، بن‌ها و گواهی‌ها را با داده‌های واقعی مدیریت کنید.</p></div><div className="auth-steps"><div><Check size={16} /> ثبت‌نام امن و نقش‌محور</div><div><Check size={16} /> مدیریت ظرفیت و حضور</div><div><Check size={16} /> گواهی و گزارش واقعی</div></div></section><section className="auth-card-wrap"><Card className="auth-card border-border/80 shadow-xl shadow-slate-950/10"><CardContent><form onSubmit={submit}><Tabs value={mode} onValueChange={(value) => { setMode(value as 'login' | 'register'); setMessage('') }}><TabsList className="auth-tabs w-full"><TabsTrigger value="login">ورود</TabsTrigger><TabsTrigger value="register">ثبت‌نام</TabsTrigger></TabsList></Tabs><CardHeader className="px-0"><CardTitle>{mode === 'login' ? 'خوش آمدید' : 'ساخت حساب شرکت‌کننده'}</CardTitle><CardDescription>{mode === 'login' ? 'با اطلاعات حساب خود وارد شوید.' : 'پس از ثبت‌نام، رویدادهای منتشرشده را می‌توانید انتخاب کنید.'}</CardDescription></CardHeader><div className="grid gap-4">{mode === 'register' && <Label>نام و نام خانوادگی<Input name="name" required minLength={2} placeholder="مثال: محمد شریفی" /></Label>}<Label>ایمیل<Input name="email" type="email" required autoComplete="email" placeholder="name@example.com" /></Label>{mode === 'register' && <><Label>شماره همراه<Input name="phone" inputMode="tel" placeholder="09…" /></Label><Label>دانشگاه یا سازمان<Input name="organization" placeholder="اختیاری" /></Label></>}<Label>گذرواژه<Input name="password" type="password" required minLength={8} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} placeholder="حداقل ۸ کاراکتر" /></Label>{mode === 'register' && <Label>تکرار گذرواژه<Input name="password_confirmation" type="password" required minLength={8} autoComplete="new-password" /></Label>}{message && <Alert variant="destructive"><CircleAlert size={16} /><AlertTitle>انجام نشد</AlertTitle><AlertDescription>{message}</AlertDescription></Alert>}<Button className="mt-2 w-full" size="lg" disabled={busy}>{busy ? 'لطفاً صبر کنید…' : mode === 'login' ? 'ورود به سامانه' : 'ثبت‌نام و ورود'} <ChevronLeft size={18} /></Button></div><p className="auth-note">حساب‌های مدیر و دبیر تنها توسط مدیر سامانه ایجاد می‌شوند.</p></form></CardContent></Card></section></main>
+  const switchMode = (nextMode: 'login' | 'register') => { setMode(nextMode); setMessage('') }
+
+  return (
+    <main className="auth-reference">
+      <section className="auth-visual" style={{ backgroundImage: `url(${conferenceImage})` }}>
+        <div className="auth-visual-overlay" />
+        <div className="auth-visual-body">
+          <div className="auth-identity">
+            <div className="auth-identity-copy"><strong>فَرا رویداد</strong><span>سامانه هوشمند مدیریت رویداد</span></div>
+          </div>
+          <div className="auth-hero-copy">
+            <span className="auth-kicker">پلتفرم مدیریت رویدادهای علمی</span>
+            <h1>یک تجربه منظم،<br />برای رویدادهای حرفه‌ای.</h1>
+            <p>ثبت‌نام، مدیریت نشست‌ها و گواهی‌ها؛ در یک فضای آرام و یکپارچه.</p>
+          </div>
+          <div className="auth-visual-footer"><span>برای رویدادهایی که جزئیات‌شان مهم است</span><span>EventHub</span></div>
+        </div>
+      </section>
+      <section className="auth-form-panel">
+        <div className="auth-panel-help"><span>فَرا رویداد</span><span>پشتیبانی رویداد</span></div>
+        <Card className="auth-reference-card">
+          <CardContent>
+            <form onSubmit={submit}>
+              <Tabs value={mode} onValueChange={(value) => switchMode(value as 'login' | 'register')}>
+                <TabsList className="auth-mode-tabs"><TabsTrigger value="login">ورود به حساب</TabsTrigger><TabsTrigger value="register">ایجاد حساب</TabsTrigger></TabsList>
+              </Tabs>
+              <div className="auth-form-heading">
+                <span className="auth-form-eyebrow">فضای کاربری</span>
+                <h2>{mode === 'login' ? 'خوش آمدید' : 'ایجاد حساب کاربری'}</h2>
+                <p>{mode === 'login' ? 'برای ادامه، اطلاعات حساب خود را وارد کنید.' : 'اطلاعات هویتی خود را برای ثبت‌نام وارد کنید.'}</p>
+              </div>
+              {mode === 'login' ? (
+                <div className="auth-form-fields">
+                  <div className="auth-role-list" aria-label="نقش‌های پشتیبانی‌شده"><span>دبیر رویداد</span><span>مدرس</span><span className="active">شرکت‌کننده</span></div>
+                  <Label className="auth-field"><span>ایمیل</span><Input name="email" type="email" required autoComplete="email" placeholder="name@example.com" /></Label>
+                  <Label className="auth-field"><span>گذرواژه</span><Input name="password" type="password" required minLength={8} autoComplete="current-password" placeholder="گذرواژه خود را وارد کنید" /></Label>
+                  <div className="auth-login-options"><Button type="button" variant="link" size="sm" disabled>فراموشی گذرواژه</Button><Label className="auth-remember"><Input name="remember" type="checkbox" defaultChecked /> <span>مرا به خاطر بسپار</span></Label></div>
+                </div>
+              ) : (
+                <div className="auth-form-fields">
+                  <p className="auth-account-type">حساب‌های جدید با نقش شرکت‌کننده ایجاد می‌شوند؛ نقش‌های دیگر توسط مدیر سامانه فعال می‌شوند.</p>
+                  <div className="auth-register-grid">
+                    <Label className="auth-field"><span>نام و نام خانوادگی</span><Input name="name" required minLength={2} placeholder="مثال: محمد شریفی" /></Label>
+                    <Label className="auth-field"><span>شماره همراه</span><Input name="phone" type="tel" inputMode="tel" required placeholder="۰۹۱۲۱۲۳۴۵۶۷" /></Label>
+                    <Label className="auth-field"><span>ایمیل</span><Input name="email" type="email" required autoComplete="email" placeholder="name@example.com" /></Label>
+                    <Label className="auth-field"><span>کد ملی</span><Input name="national_code" inputMode="numeric" required placeholder="۱۰ رقم" /></Label>
+                    <Label className="auth-field"><span>گذرواژه</span><Input name="password" type="password" required minLength={8} autoComplete="new-password" placeholder="حداقل ۸ کاراکتر" /></Label>
+                    <Label className="auth-field"><span>تکرار گذرواژه</span><Input name="password_confirmation" type="password" required minLength={8} autoComplete="new-password" placeholder="تکرار گذرواژه" /></Label>
+                  </div>
+                  <Label className="auth-field"><span>دانشگاه یا سازمان <small>اختیاری</small></span><Input name="organization" placeholder="نام دانشگاه یا سازمان" /></Label>
+                </div>
+              )}
+              {message && <Alert variant="destructive" className="auth-alert"><CircleAlert size={16} /><AlertTitle>انجام نشد</AlertTitle><AlertDescription>{message}</AlertDescription></Alert>}
+              <Button className="auth-submit" size="lg" disabled={busy}>{busy ? 'لطفاً صبر کنید…' : mode === 'login' ? 'ورود به سامانه' : 'ثبت‌نام و ورود'}</Button>
+              <div className="auth-divider"><span /> <small>یا</small> <span /></div>
+              <div className="auth-switch"><span>{mode === 'login' ? 'حساب کاربری ندارید؟' : 'قبلاً ثبت‌نام کرده‌اید؟'}</span><Button type="button" variant="link" size="sm" onClick={() => switchMode(mode === 'login' ? 'register' : 'login')}>{mode === 'login' ? 'ایجاد حساب کاربری' : 'ورود به حساب'}</Button></div>
+            </form>
+          </CardContent>
+        </Card>
+        <div className="auth-security">ارتباط شما با سامانه رمزنگاری و محافظت می‌شود</div>
+      </section>
+    </main>
+  )
 }
 
 const iconForTone: Record<Metric['tone'], LucideIcon> = { blue: Users, green: ClipboardCheck, amber: CalendarDays, violet: Award }
@@ -242,7 +321,7 @@ function Shell({ session, onSessionChange }: { session: Session; onSessionChange
   const staff = session.user.role === 'admin' || session.user.role === 'organizer'
   useEffect(() => { const update = () => setPage((location.hash.slice(1) as Page) || 'dashboard'); addEventListener('hashchange', update); return () => removeEventListener('hashchange', update) }, [])
   function navigate(next: Page) { location.hash = next; setPage(next); setMobileOpen(false) }
-  async function logout() { try { await api('/auth/logout', { method: 'POST' }) } finally { localStorage.removeItem('eventhub_token'); onSessionChange(null) } }
+  async function logout() { try { await api('/auth/logout', { method: 'POST' }) } finally { localStorage.removeItem('eventhub_token'); sessionStorage.removeItem('eventhub_token'); onSessionChange(null) } }
   const current = useMemo(() => { const props = { user: session.user }; if (page === 'events') return <EventsPage {...props} />; if (page === 'registrations') return <RegistrationsPage {...props} />; if (page === 'people' && staff) return <PeoplePage {...props} />; if (page === 'vouchers') return <VouchersPage {...props} />; if (page === 'attendance' && staff) return <AttendancePage />; if (page === 'certificates') return <CertificatesPage {...props} />; if (page === 'reports' && staff) return <ReportsPage />; if (page === 'profile') return <ProfilePage user={session.user} onUpdated={(user) => onSessionChange({ ...session, user })} />; return <DashboardPage {...props} /> }, [page, session, staff, onSessionChange])
   return <main className="app-shell"><Button variant="outline" size="icon" className="mobile-menu" onClick={() => setMobileOpen(!mobileOpen)} aria-label="باز کردن منو"><Menu size={21} /></Button><aside className={`sidebar ${mobileOpen ? 'open' : ''}`}><div className="brand"><div className="brand-mark"><Sparkles size={21} /></div><div><strong>فَرا رویداد</strong><span>مدیریت رویداد علمی</span></div></div><div className="profile-card"><Avatar className="profile-avatar"><AvatarFallback>{session.user.name.slice(0, 1)}</AvatarFallback></Avatar><div><b>{session.user.name}</b><span>{roleTitle(session.user.role)}</span></div></div><nav>{navigation.filter((item) => !item.staff || staff).map(({ page: target, label, icon: Icon }) => <Button key={target} variant={page === target ? 'secondary' : 'ghost'} className={`nav-item ${page === target ? 'active' : ''}`} onClick={() => navigate(target)}><Icon size={18} />{label}</Button>)}</nav><Button variant="ghost" className="logout" onClick={() => void logout()}><LogOut size={18} /> خروج از حساب</Button></aside><section className="workspace"><header className="topbar"><span className="topbar-title">{navigation.find((item) => item.page === page)?.label ?? 'نمای کلی'}</span><span className="topbar-user"><UserRound size={17} /> {session.user.name}</span></header><div className="content">{current}</div></section></main>
 }
@@ -250,7 +329,7 @@ function Shell({ session, onSessionChange }: { session: Session; onSessionChange
 export default function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [checking, setChecking] = useState(true)
-  useEffect(() => { const token = localStorage.getItem('eventhub_token'); if (!token) { setChecking(false); return } api<User>('/profile').then((user) => setSession({ token, user })).catch(() => localStorage.removeItem('eventhub_token')).finally(() => setChecking(false)) }, [])
+  useEffect(() => { const token = getStoredToken(); if (!token) { setChecking(false); return } api<User>('/profile').then((user) => setSession({ token, user })).catch(() => { localStorage.removeItem('eventhub_token'); sessionStorage.removeItem('eventhub_token') }).finally(() => setChecking(false)) }, [])
   if (checking) return <main className="auth-screen"><Loading /></main>
   return session ? <Shell session={session} onSessionChange={setSession} /> : <AuthScreen onAuthenticated={setSession} />
 }

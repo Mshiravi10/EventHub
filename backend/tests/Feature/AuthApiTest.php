@@ -19,6 +19,7 @@ class AuthApiTest extends TestCase
             'password' => 'SecurePass8',
             'password_confirmation' => 'SecurePass8',
             'phone' => '09120000000',
+            'national_code' => '0012345678',
         ]);
 
         $response
@@ -29,6 +30,7 @@ class AuthApiTest extends TestCase
 
         $this->assertDatabaseHas('users', [
             'email' => 'person@example.test',
+            'national_code' => '0012345678',
             'role' => 'participant',
         ]);
     }
@@ -55,9 +57,23 @@ class AuthApiTest extends TestCase
             'email' => 'normal@example.test',
             'password' => 'SecurePass8',
             'password_confirmation' => 'SecurePass8',
+            'national_code' => '0012345679',
             'role' => 'admin',
         ])
             ->assertCreated()
             ->assertJsonPath('user.role', 'participant');
+    }
+
+    public function test_rejects_an_invalid_national_code_during_registration_with_422(): void
+    {
+        $this->postJson('/api/auth/register', [
+            'name' => 'کاربر عادی',
+            'email' => 'invalid-national-code@example.test',
+            'password' => 'SecurePass8',
+            'password_confirmation' => 'SecurePass8',
+            'national_code' => '1234',
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['national_code']);
     }
 }

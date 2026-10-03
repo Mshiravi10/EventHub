@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "@fontsource-variable/vazirmatn";
 @import "./styles.css";
+@import "./auth.css";
 
 @custom-variant dark (&:is(.dark *));
 
