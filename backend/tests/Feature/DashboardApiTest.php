@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Tests\TestCase;
 
@@ -9,14 +10,20 @@ class DashboardApiTest extends TestCase
 {
     use LazilyRefreshDatabase;
 
-    public function test_returns_dashboard_data_for_a_published_event(): void
+    public function test_returns_401_when_dashboard_token_is_missing(): void
     {
-        $this->seed();
+        $this->getJson('/api/dashboard')->assertUnauthorized();
+    }
 
-        $this->getJson('/api/dashboard')
+    public function test_returns_empty_staff_dashboard_when_no_event_exists(): void
+    {
+        $organizer = User::factory()->create(['role' => 'organizer']);
+        $token = $organizer->createToken('test')->plainTextToken;
+
+        $this->withToken($token)->getJson('/api/dashboard')
             ->assertOk()
-            ->assertJsonPath('event.slug', 'national-science-summit-1405')
-            ->assertJsonCount(4, 'metrics')
-            ->assertJsonCount(4, 'sessions');
+            ->assertJsonPath('mode', 'organizer')
+            ->assertJsonPath('event', null)
+            ->assertJsonCount(0, 'metrics');
     }
 }

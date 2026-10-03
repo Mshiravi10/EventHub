@@ -1,254 +1,247 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { FormEvent } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
-  ArrowUpLeft,
   Award,
   BadgeCheck,
-  Bell,
+  Building2,
   CalendarDays,
   ChartNoAxesCombined,
-  CheckCircle2,
-  ChevronDown,
-  CircleHelp,
-  Clock3,
-  Download,
+  Check,
+  ChevronLeft,
+  CircleAlert,
+  ClipboardCheck,
   LayoutDashboard,
-  MoreHorizontal,
-  Presentation,
+  LogOut,
+  Menu,
+  Plus,
   QrCode,
+  RefreshCw,
   ScanLine,
+  ShieldCheck,
   Sparkles,
   Ticket,
   UserRound,
   Users,
 } from 'lucide-react'
 
-type Tone = 'blue' | 'green' | 'amber' | 'violet'
+type Role = 'admin' | 'organizer' | 'instructor' | 'participant'
+type User = { id: number; name: string; email: string; role: Role; phone?: string | null; organization?: string | null; is_active: boolean; event_registrations_count?: number }
+type Session = { token: string; user: User }
+type EventSession = { id: number; title: string; type: string; instructor_name?: string | null; room?: string | null; starts_at: string; ends_at: string; capacity: number; registered_count: number; instructor?: Pick<User, 'id' | 'name'> | null }
+type EventRecord = { id: number; title: string; slug: string; description?: string | null; location?: string | null; starts_at: string; ends_at: string; capacity: number; status: string; sessions: EventSession[]; primary_registrations_count?: number }
+type Registration = { id: number; registration_code: string; status: string; attendance_status: string; checked_in_at?: string | null; event_session_id?: number | null; user?: User; event: EventRecord; session?: EventSession | null }
+type Voucher = { id: number; title: string; type: string; code: string; status: string; redeemed_at?: string | null; user?: User; event: EventRecord; session?: EventSession | null }
+type Certificate = { id: number; type: string; serial_number: string; status: string; issued_at?: string | null; user?: User; event: EventRecord; session?: EventSession | null }
+type Metric = { label: string; value: number; detail: string; tone: 'blue' | 'green' | 'amber' | 'violet' }
+type Dashboard = { mode: Role | 'organizer'; event?: EventRecord | null; metrics: Metric[]; sessions?: EventSession[]; registrations?: Registration[]; vouchers?: Voucher[]; certificates?: Certificate[] }
+type Report = { events: Array<EventRecord & { registrations_count: number; attendance_count: number; vouchers_count: number; redeemed_vouchers_count: number; certificates_count: number }>; totals: { events: number; registrations: number; attendance: number; vouchers: number; redeemed_vouchers: number; certificates: number } }
 
-type Metric = { label: string; value: number; detail: string; tone: Tone }
-type Session = {
-  id: number
-  title: string
-  type: string
-  instructor_name: string | null
-  room: string | null
-  starts_at: string
-  ends_at: string
-  capacity: number
-  registered_count: number
-}
-type Voucher = { id: number; title: string; type: string; code: string; status: string }
-type Certificate = { id: number; type: string; serial_number: string; status: string }
-type DashboardData = {
-  event: { title: string; location: string; starts_at: string; ends_at: string }
-  metrics: Metric[]
-  sessions: Session[]
-  vouchers: Voucher[]
-  certificates: Certificate[]
-  notices: { title: string; body: string; tone: Tone }[]
+class ApiError extends Error {
+  status: number
+  errors?: Record<string, string[]>
+  constructor(status: number, message: string, errors?: Record<string, string[]>) {
+    super(message)
+    this.status = status
+    this.errors = errors
+  }
 }
 
-const sampleDashboard: DashboardData = {
-  event: {
-    title: 'همایش ملی آینده علم و فناوری',
-    location: 'مرکز همایش‌های دانشگاه تهران',
-    starts_at: '2026-10-15T08:30:00',
-    ends_at: '2026-10-16T18:00:00',
-  },
-  metrics: [
-    { label: 'ثبت‌نام کل', value: 316, detail: 'نفر ثبت‌نام‌شده', tone: 'blue' },
-    { label: 'حضور تأییدشده', value: 194, detail: 'نفر در محل رویداد', tone: 'green' },
-    { label: 'ظرفیت کارگاه‌ها', value: 79, detail: '267 از 338 صندلی', tone: 'amber' },
-    { label: 'بن‌های مصرف‌شده', value: 128, detail: 'از 316 بن فعال', tone: 'violet' },
-  ],
-  sessions: [
-    { id: 1, title: 'افتتاحیه و سخنرانی کلیدی', type: 'keynote', instructor_name: 'دکتر نادر فرهمند', room: 'سالن اصلی', starts_at: '2026-10-15T09:00:00', ends_at: '2026-10-15T10:30:00', capacity: 420, registered_count: 316 },
-    { id: 2, title: 'کارگاه کاربردهای هوش مصنوعی', type: 'workshop', instructor_name: 'دکتر لیلا رستگار', room: 'تالار نوآوری', starts_at: '2026-10-15T11:00:00', ends_at: '2026-10-15T13:00:00', capacity: 80, registered_count: 63 },
-    { id: 3, title: 'پنل داده و سیاست‌گذاری علمی', type: 'panel', instructor_name: 'دکتر پیمان کیانی', room: 'سالن ابن‌سینا', starts_at: '2026-10-15T14:00:00', ends_at: '2026-10-15T15:30:00', capacity: 150, registered_count: 118 },
-  ],
-  vouchers: [
-    { id: 1, title: 'بن پذیرایی روز اول', type: 'food', code: 'FOOD-1405-01', status: 'redeemed' },
-    { id: 2, title: 'بن پذیرایی روز دوم', type: 'food', code: 'FOOD-1405-02', status: 'active' },
-    { id: 3, title: 'ورود به کارگاه هوش مصنوعی', type: 'workshop', code: 'WS-AI-1405', status: 'active' },
-  ],
-  certificates: [
-    { id: 1, type: 'حضور در رویداد', serial_number: 'CERT-AT-1405-0001', status: 'issued' },
-  ],
-  notices: [
-    { title: 'آماده‌سازی گواهی‌ها', body: 'گواهی شرکت پس از ثبت حضور برای شرکت‌کنندگان صادر می‌شود.', tone: 'blue' },
-    { title: 'درگاه حضور و غیاب فعال است', body: 'کد ورود شرکت‌کنندگان را در پنل حضور و غیاب اسکن کنید.', tone: 'green' },
-  ],
+async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const token = localStorage.getItem('eventhub_token')
+  const headers = new Headers(options.headers)
+  headers.set('Accept', 'application/json')
+  if (options.body) headers.set('Content-Type', 'application/json')
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+
+  const response = await fetch(`/api${path}`, { ...options, headers })
+  if (response.status === 204) return undefined as T
+  const payload = await response.json().catch(() => ({})) as Record<string, unknown>
+  if (!response.ok) {
+    const message = typeof payload.message === 'string' ? payload.message : 'درخواست با خطا روبه‌رو شد.'
+    throw new ApiError(response.status, message, payload.errors as Record<string, string[]> | undefined)
+  }
+  return payload as T
 }
 
-const navigation: { label: string; icon: LucideIcon }[] = [
-  { label: 'نمای کلی', icon: LayoutDashboard },
-  { label: 'رویدادها و نشست‌ها', icon: CalendarDays },
-  { label: 'شرکت‌کنندگان', icon: Users },
-  { label: 'بن‌ها و خدمات', icon: Ticket },
-  { label: 'حضور و غیاب', icon: ScanLine },
-  { label: 'گواهی‌ها', icon: BadgeCheck },
-  { label: 'گزارش‌ها', icon: ChartNoAxesCombined },
+function getError(error: unknown): string {
+  if (error instanceof ApiError) {
+    const first = error.errors ? Object.values(error.errors).flat()[0] : undefined
+    return first ?? error.message
+  }
+  return 'ارتباط با سامانه برقرار نشد.'
+}
+
+function number(value: number): string { return new Intl.NumberFormat('fa-IR').format(value) }
+function date(value?: string | null): string { return value ? new Intl.DateTimeFormat('fa-IR', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '—' }
+function roleTitle(role: Role): string { return ({ admin: 'مدیر سامانه', organizer: 'دبیر رویداد', instructor: 'مدرس', participant: 'شرکت‌کننده' })[role] }
+function sessionType(type: string): string { return ({ session: 'نشست', workshop: 'کارگاه', keynote: 'سخنرانی', panel: 'پنل', networking: 'شبکه‌سازی' })[type] ?? type }
+
+function useData<T>(path: string): { data: T | null; loading: boolean; error: string; reload: () => Promise<void> } {
+  const [data, setData] = useState<T | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const reload = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try { setData(await api<T>(path)) } catch (reason) { setError(getError(reason)) } finally { setLoading(false) }
+  }, [path])
+
+  useEffect(() => { void reload() }, [reload])
+  return { data, loading, error, reload }
+}
+
+function Empty({ title, detail }: { title: string; detail: string }) {
+  return <div className="empty"><Sparkles size={24} /><h3>{title}</h3><p>{detail}</p></div>
+}
+
+function Loading() { return <div className="loading"><RefreshCw size={20} /> در حال دریافت اطلاعات…</div> }
+
+function PageHeader({ title, subtitle, children }: { title: string; subtitle: string; children?: React.ReactNode }) {
+  return <div className="page-header"><div><p className="eyebrow">فَرا رویداد</p><h1>{title}</h1><p>{subtitle}</p></div>{children && <div className="page-actions">{children}</div>}</div>
+}
+
+function AuthScreen({ onAuthenticated }: { onAuthenticated: (session: Session) => void }) {
+  const [mode, setMode] = useState<'login' | 'register'>('login')
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    setBusy(true); setMessage('')
+    try {
+      const payload = await api<Session>(mode === 'login' ? '/auth/login' : '/auth/register', {
+        method: 'POST',
+        body: JSON.stringify(Object.fromEntries(form.entries())),
+      })
+      localStorage.setItem('eventhub_token', payload.token)
+      onAuthenticated(payload)
+    } catch (reason) { setMessage(getError(reason)) } finally { setBusy(false) }
+  }
+
+  return <main className="auth-screen"><section className="auth-aside"><div className="brand big"><div className="brand-mark"><Sparkles size={25} /></div><div><strong>فَرا رویداد</strong><span>سامانه مدیریت رویداد علمی</span></div></div><div className="auth-copy"><span>مدیریت یکپارچه</span><h1>از ثبت‌نام تا گواهی، در یک سامانه.</h1><p>رویدادها، شرکت‌کنندگان، حضور و غیاب، بن‌ها و گواهی‌ها را با داده‌های واقعی مدیریت کنید.</p></div><div className="auth-steps"><div><Check size={16} /> ثبت‌نام امن و نقش‌محور</div><div><Check size={16} /> مدیریت ظرفیت و حضور</div><div><Check size={16} /> گواهی و گزارش واقعی</div></div></section><section className="auth-card-wrap"><form className="auth-card" onSubmit={submit}><div className="auth-tabs"><button type="button" className={mode === 'login' ? 'active' : ''} onClick={() => { setMode('login'); setMessage('') }}>ورود</button><button type="button" className={mode === 'register' ? 'active' : ''} onClick={() => { setMode('register'); setMessage('') }}>ثبت‌نام</button></div><h2>{mode === 'login' ? 'خوش آمدید' : 'ساخت حساب شرکت‌کننده'}</h2><p>{mode === 'login' ? 'با اطلاعات حساب خود وارد شوید.' : 'پس از ثبت‌نام، رویدادهای منتشرشده را می‌توانید انتخاب کنید.'}</p>{mode === 'register' && <label>نام و نام خانوادگی<input name="name" required minLength={2} placeholder="مثال: محمد شریفی" /></label>}<label>ایمیل<input name="email" type="email" required autoComplete="email" placeholder="name@example.com" /></label>{mode === 'register' && <><label>شماره همراه<input name="phone" inputMode="tel" placeholder="09…" /></label><label>دانشگاه یا سازمان<input name="organization" placeholder="اختیاری" /></label></>}<label>گذرواژه<input name="password" type="password" required minLength={8} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} placeholder="حداقل ۸ کاراکتر" /></label>{mode === 'register' && <label>تکرار گذرواژه<input name="password_confirmation" type="password" required minLength={8} autoComplete="new-password" /></label>}{message && <p className="form-error"><CircleAlert size={16} /> {message}</p>}<button className="primary-button full" disabled={busy}>{busy ? 'لطفاً صبر کنید…' : mode === 'login' ? 'ورود به سامانه' : 'ثبت‌نام و ورود'} <ChevronLeft size={18} /></button><p className="auth-note">حساب‌های مدیر و دبیر تنها توسط مدیر سامانه ایجاد می‌شوند.</p></form></section></main>
+}
+
+const iconForTone: Record<Metric['tone'], LucideIcon> = { blue: Users, green: ClipboardCheck, amber: CalendarDays, violet: Award }
+
+function DashboardPage({ user }: { user: User }) {
+  const { data, loading, error, reload } = useData<Dashboard>('/dashboard')
+  if (loading) return <Loading />
+  if (error) return <Empty title="دریافت داشبورد ممکن نشد" detail={error} />
+  const metrics = data?.metrics ?? []
+  return <><PageHeader title="نمای کلی" subtitle={`خوش آمدید، ${user.name}`}><button className="secondary-button" onClick={() => void reload()}><RefreshCw size={16} /> بروزرسانی</button></PageHeader>{metrics.length === 0 ? <Empty title="هنوز داده‌ای ثبت نشده است" detail={user.role === 'admin' || user.role === 'organizer' ? 'از بخش رویدادها اولین رویداد واقعی خود را ایجاد کنید.' : 'هنوز رویداد یا ثبت‌نامی برای حساب شما وجود ندارد.'} /> : <><section className="metric-grid">{metrics.map((metric) => { const Icon = iconForTone[metric.tone]; return <article className={`metric-card ${metric.tone}`} key={metric.label}><div className="metric-icon"><Icon size={20} /></div><p>{metric.label}</p><strong>{number(metric.value)}{metric.label.includes('ظرفیت') ? '٪' : ''}</strong><span>{metric.detail}</span></article> })}</section>{data?.event && <section className="panel dashboard-event"><div><span className="status published">{data.event.status === 'published' ? 'منتشرشده' : data.event.status}</span><h2>{data.event.title}</h2><p>{data.event.location ?? 'مکان ثبت نشده'} · {date(data.event.starts_at)}</p></div><CalendarDays size={38} /></section>}{(data?.sessions?.length ?? 0) > 0 && <section className="panel"><div className="panel-heading"><div><h2>نشست‌ها</h2><p>برنامه‌های ثبت‌شده در سامانه</p></div></div><div className="list">{data?.sessions?.map((session) => <div className="row" key={session.id}><div><b>{session.title}</b><span>{sessionType(session.type)} · {session.room ?? 'بدون سالن'}</span></div><div className="row-meta">{number(session.registered_count)} از {number(session.capacity)} نفر</div></div>)}</div></section>}</>}</>
+}
+
+function EventForm({ onCreated }: { onCreated: () => Promise<void> }) {
+  const [open, setOpen] = useState(false); const [busy, setBusy] = useState(false); const [message, setMessage] = useState('')
+  async function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const form = new FormData(event.currentTarget); setBusy(true); setMessage(''); try { await api('/events', { method: 'POST', body: JSON.stringify(Object.fromEntries(form.entries())) }); await onCreated(); setOpen(false); event.currentTarget.reset() } catch (reason) { setMessage(getError(reason)) } finally { setBusy(false) } }
+  if (!open) return <button className="primary-button" onClick={() => setOpen(true)}><Plus size={17} /> ایجاد رویداد</button>
+  return <form className="inline-form" onSubmit={submit}><h3>رویداد جدید</h3><label>عنوان<input name="title" required /></label><label>مکان<input name="location" /></label><label>شروع<input name="starts_at" type="datetime-local" required /></label><label>پایان<input name="ends_at" type="datetime-local" required /></label><label>ظرفیت<input name="capacity" type="number" min="1" required /></label><label>وضعیت<select name="status" defaultValue="draft"><option value="draft">پیش‌نویس</option><option value="published">منتشرشده</option><option value="archived">بایگانی</option></select></label><label className="wide">توضیحات<textarea name="description" rows={3} /></label>{message && <p className="form-error wide"><CircleAlert size={16} />{message}</p>}<div className="form-buttons wide"><button type="button" className="secondary-button" onClick={() => setOpen(false)}>انصراف</button><button className="primary-button" disabled={busy}>{busy ? 'در حال ذخیره…' : 'ذخیره رویداد'}</button></div></form>
+}
+
+function SessionForm({ eventId, onCreated }: { eventId: number; onCreated: () => Promise<void> }) {
+  const { data: users } = useData<User[]>('/users')
+  const [open, setOpen] = useState(false); const [busy, setBusy] = useState(false); const [message, setMessage] = useState('')
+  async function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const form = new FormData(event.currentTarget); const body: Record<string, unknown> = Object.fromEntries(form.entries()); body.attendance_required = true; setBusy(true); setMessage(''); try { await api(`/events/${eventId}/sessions`, { method: 'POST', body: JSON.stringify(body) }); await onCreated(); setOpen(false); event.currentTarget.reset() } catch (reason) { setMessage(getError(reason)) } finally { setBusy(false) } }
+  return <div>{!open ? <button className="text-button" onClick={() => setOpen(true)}><Plus size={15} /> افزودن نشست</button> : <form className="inline-form compact-form" onSubmit={submit}><h3>نشست جدید</h3><label>عنوان<input name="title" required /></label><label>نوع<select name="type"><option value="session">نشست</option><option value="workshop">کارگاه</option><option value="keynote">سخنرانی</option><option value="panel">پنل</option><option value="networking">شبکه‌سازی</option></select></label><label>مدرس حساب‌دار<select name="instructor_id" defaultValue=""><option value="">بدون حساب مدرس</option>{users?.filter((item) => item.role === 'instructor').map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>نام مدرس<input name="instructor_name" placeholder="برای نمایش عمومی" /></label><label>سالن<input name="room" /></label><label>شروع<input name="starts_at" type="datetime-local" required /></label><label>پایان<input name="ends_at" type="datetime-local" required /></label><label>ظرفیت<input name="capacity" type="number" min="1" required /></label>{message && <p className="form-error"><CircleAlert size={16} />{message}</p>}<div className="form-buttons"><button type="button" className="secondary-button" onClick={() => setOpen(false)}>انصراف</button><button className="primary-button" disabled={busy}>ذخیره</button></div></form>}</div>
+}
+
+function EventsPage({ user }: { user: User }) {
+  const { data, loading, error, reload } = useData<EventRecord[]>('/events')
+  const [message, setMessage] = useState('')
+  const staff = user.role === 'admin' || user.role === 'organizer'
+  async function register(eventId: number, sessionId?: number) { setMessage(''); try { await api('/registrations', { method: 'POST', body: JSON.stringify({ event_id: eventId, ...(sessionId ? { event_session_id: sessionId } : {}) }) }); setMessage('ثبت‌نام با موفقیت انجام شد.') } catch (reason) { setMessage(getError(reason)) } }
+  return <><PageHeader title="رویدادها و نشست‌ها" subtitle={staff ? 'ایجاد، انتشار و برنامه‌ریزی رویدادهای واقعی' : 'رویدادهای منتشرشده و امکان ثبت‌نام'}>{staff && <EventForm onCreated={reload} />}<button className="secondary-button" onClick={() => void reload()}><RefreshCw size={16} /></button></PageHeader>{message && <p className={message.includes('موفقیت') ? 'notice success' : 'notice error'}>{message}</p>}{loading ? <Loading /> : error ? <Empty title="فهرست رویدادها در دسترس نیست" detail={error} /> : data?.length === 0 ? <Empty title="رویدادی وجود ندارد" detail={staff ? 'با «ایجاد رویداد» اولین رویداد را بسازید.' : 'دبیرخانه هنوز رویدادی منتشر نکرده است.'} /> : <div className="event-grid">{data?.map((event) => <article className="event-card" key={event.id}><div className="event-card-top"><span className={`status ${event.status}`}>{event.status === 'published' ? 'منتشرشده' : event.status === 'draft' ? 'پیش‌نویس' : 'بایگانی'}</span><span>{date(event.starts_at)}</span></div><h2>{event.title}</h2><p>{event.description || 'توضیحی ثبت نشده است.'}</p><div className="event-details"><span><Building2 size={15} /> {event.location ?? 'بدون مکان'}</span><span><Users size={15} /> {number(event.primary_registrations_count ?? 0)} از {number(event.capacity)}</span></div>{!staff && <button className="primary-button full" disabled={event.status !== 'published'} onClick={() => void register(event.id)}>ثبت‌نام در رویداد</button>}{staff && <SessionForm eventId={event.id} onCreated={reload} />}<div className="session-list">{event.sessions.map((session) => <div className="session-row" key={session.id}><div><b>{session.title}</b><span>{sessionType(session.type)} · {session.instructor?.name ?? session.instructor_name ?? 'مدرس تعیین نشده'}</span></div><div>{!staff && <button className="small-button" onClick={() => void register(event.id, session.id)}>انتخاب نشست</button>}<small>{number(session.registered_count)}/{number(session.capacity)}</small></div></div>)}</div></article>)}</div>}</>
+}
+
+function RegistrationsPage({ user }: { user: User }) {
+  const { data, loading, error, reload } = useData<Registration[]>('/registrations')
+  const staff = user.role === 'admin' || user.role === 'organizer'
+  return <><PageHeader title={staff ? 'شرکت‌کنندگان و ثبت‌نام‌ها' : 'ثبت‌نام‌های من'} subtitle={staff ? 'فهرست ثبت‌نام‌های ثبت‌شده در سامانه' : 'کد ورود و وضعیت حضور خود را پیگیری کنید.'}><button className="secondary-button" onClick={() => void reload()}><RefreshCw size={16} /></button></PageHeader>{loading ? <Loading /> : error ? <Empty title="اطلاعات در دسترس نیست" detail={error} /> : data?.length === 0 ? <Empty title="ثبت‌نامی وجود ندارد" detail="پس از انتخاب رویداد، رکورد ثبت‌نام اینجا نمایش داده می‌شود." /> : <div className="panel table-wrap"><table><thead><tr>{staff && <th>شرکت‌کننده</th>}<th>رویداد</th><th>نشست</th><th>کد ورود</th><th>حضور</th></tr></thead><tbody>{data?.map((item) => <tr key={item.id}>{staff && <td>{item.user?.name}<small>{item.user?.email}</small></td>}<td>{item.event.title}</td><td>{item.session?.title ?? 'ثبت‌نام اصلی رویداد'}</td><td className="mono">{item.registration_code}</td><td><span className={`status ${item.attendance_status === 'attended' ? 'published' : 'draft'}`}>{item.attendance_status === 'attended' ? 'حاضر' : 'ثبت نشده'}</span></td></tr>)}</tbody></table></div>}</>
+}
+
+function VoucherIssueForm({ onCreated }: { onCreated: () => Promise<void> }) {
+  const { data: users } = useData<User[]>('/users')
+  const { data: events } = useData<EventRecord[]>('/events')
+  const [open, setOpen] = useState(false); const [busy, setBusy] = useState(false); const [message, setMessage] = useState('')
+  const [eventId, setEventId] = useState('')
+  const currentEvent = events?.find((event) => event.id === Number(eventId))
+  async function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setBusy(true); setMessage(''); try { await api('/vouchers', { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget).entries())) }); await onCreated(); setOpen(false); event.currentTarget.reset() } catch (reason) { setMessage(getError(reason)) } finally { setBusy(false) } }
+  if (!open) return <button className="primary-button" onClick={() => setOpen(true)}><Plus size={17} /> صدور بن</button>
+  return <form className="inline-form issue-form" onSubmit={submit}><h3>صدور بن جدید</h3><label>شرکت‌کننده<select name="user_id" required defaultValue=""><option value="" disabled>انتخاب کاربر</option>{users?.map((item) => <option key={item.id} value={item.id}>{item.name} — {item.email}</option>)}</select></label><label>رویداد<select name="event_id" required value={eventId} onChange={(event) => setEventId(event.target.value)}><option value="" disabled>انتخاب رویداد</option>{events?.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label><label>نشست<select name="event_session_id" defaultValue=""><option value="">بدون نشست</option>{currentEvent?.sessions.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label><label>نوع<select name="type"><option value="food">پذیرایی</option><option value="workshop">کارگاه</option><option value="service">خدمت</option><option value="gift">هدیه</option></select></label><label>عنوان بن<input name="title" required placeholder="مثال: پذیرایی روز اول" /></label>{message && <p className="form-error wide"><CircleAlert size={16} />{message}</p>}<div className="form-buttons wide"><button type="button" className="secondary-button" onClick={() => setOpen(false)}>انصراف</button><button className="primary-button" disabled={busy}>{busy ? 'در حال صدور…' : 'صدور بن'}</button></div></form>
+}
+
+function CertificateIssueForm({ onCreated }: { onCreated: () => Promise<void> }) {
+  const { data: users } = useData<User[]>('/users')
+  const { data: events } = useData<EventRecord[]>('/events')
+  const [open, setOpen] = useState(false); const [busy, setBusy] = useState(false); const [message, setMessage] = useState('')
+  const [eventId, setEventId] = useState('')
+  const currentEvent = events?.find((event) => event.id === Number(eventId))
+  async function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setBusy(true); setMessage(''); try { await api('/certificates', { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget).entries())) }); await onCreated(); setOpen(false); event.currentTarget.reset() } catch (reason) { setMessage(getError(reason)) } finally { setBusy(false) } }
+  if (!open) return <button className="primary-button" onClick={() => setOpen(true)}><Plus size={17} /> صدور گواهی</button>
+  return <form className="inline-form issue-form" onSubmit={submit}><h3>صدور گواهی جدید</h3><label>شرکت‌کننده<select name="user_id" required defaultValue=""><option value="" disabled>انتخاب کاربر</option>{users?.map((item) => <option key={item.id} value={item.id}>{item.name} — {item.email}</option>)}</select></label><label>رویداد<select name="event_id" required value={eventId} onChange={(event) => setEventId(event.target.value)}><option value="" disabled>انتخاب رویداد</option>{events?.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label><label>نشست<select name="event_session_id" defaultValue=""><option value="">بدون نشست</option>{currentEvent?.sessions.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label><label>نوع<select name="type"><option value="attendance">حضور</option><option value="workshop">کارگاه</option><option value="presentation">ارائه</option><option value="speaker">سخنرانی</option></select></label><label>وضعیت<select name="status"><option value="pending">در انتظار</option><option value="issued">صادرشده</option></select></label>{message && <p className="form-error wide"><CircleAlert size={16} />{message}</p>}<div className="form-buttons wide"><button type="button" className="secondary-button" onClick={() => setOpen(false)}>انصراف</button><button className="primary-button" disabled={busy}>{busy ? 'در حال صدور…' : 'صدور گواهی'}</button></div></form>
+}
+
+function VouchersPage({ user }: { user: User }) {
+  const { data, loading, error, reload } = useData<Voucher[]>('/vouchers')
+  const staff = user.role === 'admin' || user.role === 'organizer'
+  const [code, setCode] = useState(''); const [message, setMessage] = useState('')
+  async function redeem(event: FormEvent) { event.preventDefault(); setMessage(''); try { await api('/vouchers/redeem', { method: 'POST', body: JSON.stringify({ code }) }); setCode(''); setMessage('بن با موفقیت مصرف شد.'); await reload() } catch (reason) { setMessage(getError(reason)) } }
+  return <><PageHeader title="بن‌ها و خدمات" subtitle={staff ? 'صدور، مصرف و پیگیری بن‌های تخصیص‌یافته' : 'بن‌های تخصیص‌یافته به حساب شما'}>{staff && <VoucherIssueForm onCreated={reload} />} {staff && <form className="redeem" onSubmit={redeem}><input value={code} onChange={(event) => setCode(event.target.value)} placeholder="کد بن" required /><button className="primary-button">مصرف بن</button></form>}<button className="secondary-button" onClick={() => void reload()}><RefreshCw size={16} /></button></PageHeader>{message && <p className={message.includes('موفقیت') ? 'notice success' : 'notice error'}>{message}</p>}{loading ? <Loading /> : error ? <Empty title="بن‌ها در دسترس نیستند" detail={error} /> : data?.length === 0 ? <Empty title="بنی صادر نشده است" detail={staff ? 'برای صدور بن، ابتدا شرکت‌کننده و رویداد ثبت کنید.' : 'هر بن پس از تخصیص دبیرخانه در این بخش ظاهر می‌شود.'} /> : <div className="cards">{data?.map((voucher) => <article className="voucher-card" key={voucher.id}><Ticket size={23} /><div><span>{voucher.type}</span><h3>{voucher.title}</h3><p>{voucher.event.title}</p><code>{voucher.code}</code></div><b className={voucher.status === 'active' ? 'active-state' : ''}>{voucher.status === 'active' ? 'فعال' : 'مصرف‌شده'}</b></article>)}</div>}</>
+}
+
+function CertificatesPage({ user }: { user: User }) {
+  const { data, loading, error, reload } = useData<Certificate[]>('/certificates')
+  const staff = user.role === 'admin' || user.role === 'organizer'
+  return <><PageHeader title="مرکز گواهی‌ها" subtitle={staff ? 'صدور و وضعیت گواهی‌های رویداد' : 'گواهی‌های صادرشده و در حال صدور شما'}>{staff && <CertificateIssueForm onCreated={reload} />}<button className="secondary-button" onClick={() => void reload()}><RefreshCw size={16} /></button></PageHeader>{loading ? <Loading /> : error ? <Empty title="گواهی‌ها در دسترس نیستند" detail={error} /> : data?.length === 0 ? <Empty title="گواهی‌ای وجود ندارد" detail={staff ? 'پس از برگزاری رویداد می‌توانید گواهی صادر کنید.' : 'گواهی‌های صادرشده توسط دبیرخانه اینجا قرار می‌گیرند.'} /> : <div className="cards">{data?.map((certificate) => <article className="certificate-card" key={certificate.id}><Award size={25} /><div><span>{certificate.type}</span><h3>{certificate.event.title}</h3><p>{staff ? certificate.user?.name : certificate.session?.title ?? 'گواهی رویداد'}</p><code>{certificate.serial_number}</code></div><b className={certificate.status === 'issued' ? 'active-state' : ''}>{certificate.status === 'issued' ? 'صادرشده' : certificate.status === 'revoked' ? 'باطل‌شده' : 'در انتظار'}</b></article>)}</div>}</>
+}
+
+function AttendancePage() {
+  const { data, loading, error, reload } = useData<Registration[]>('/attendance')
+  const [code, setCode] = useState(''); const [message, setMessage] = useState('')
+  async function submit(event: FormEvent) { event.preventDefault(); setMessage(''); try { const response = await api<{ message: string }>('/attendance', { method: 'POST', body: JSON.stringify({ registration_code: code }) }); setMessage(response.message); setCode(''); await reload() } catch (reason) { setMessage(getError(reason)) } }
+  return <><PageHeader title="حضور و غیاب" subtitle="کد ورود شرکت‌کننده را وارد یا اسکن کنید."><form className="redeem" onSubmit={submit}><QrCode size={19} /><input value={code} onChange={(event) => setCode(event.target.value)} placeholder="EVT-…" required /><button className="primary-button">ثبت حضور</button></form></PageHeader>{message && <p className={message.includes('موفقیت') ? 'notice success' : 'notice error'}>{message}</p>}{loading ? <Loading /> : error ? <Empty title="سوابق حضور در دسترس نیست" detail={error} /> : <div className="panel table-wrap"><table><thead><tr><th>شرکت‌کننده</th><th>رویداد</th><th>کد ورود</th><th>زمان ثبت</th></tr></thead><tbody>{data?.map((item) => <tr key={item.id}><td>{item.user?.name}</td><td>{item.event.title}</td><td className="mono">{item.registration_code}</td><td>{date(item.checked_in_at)}</td></tr>)}</tbody></table>{data?.length === 0 && <Empty title="هنوز حضوری ثبت نشده است" detail="پس از ثبت ورود، سوابق در همین جدول دیده می‌شوند." />}</div>}</>
+}
+
+function PeoplePage({ user }: { user: User }) {
+  const { data, loading, error, reload } = useData<User[]>('/users')
+  const canManage = user.role === 'admin'
+  async function changeRole(id: number, role: Role) { try { await api(`/users/${id}/role`, { method: 'PUT', body: JSON.stringify({ role }) }); await reload() } catch (reason) { window.alert(getError(reason)) } }
+  return <><PageHeader title="کاربران سامانه" subtitle="شرکت‌کنندگان، مدرس‌ها و اعضای دبیرخانه"><button className="secondary-button" onClick={() => void reload()}><RefreshCw size={16} /></button></PageHeader>{loading ? <Loading /> : error ? <Empty title="کاربران در دسترس نیستند" detail={error} /> : data?.length === 0 ? <Empty title="کاربری ثبت‌نام نکرده است" detail="ثبت‌نام کاربران در صفحه ورود انجام می‌شود." /> : <div className="panel table-wrap"><table><thead><tr><th>نام</th><th>ایمیل</th><th>نقش</th><th>رویدادها</th></tr></thead><tbody>{data?.map((person) => <tr key={person.id}><td>{person.name}</td><td>{person.email}</td><td>{canManage ? <select value={person.role} onChange={(event) => void changeRole(person.id, event.target.value as Role)}>{(['participant', 'instructor', 'organizer', 'admin'] as Role[]).map((role) => <option key={role} value={role}>{roleTitle(role)}</option>)}</select> : roleTitle(person.role)}</td><td>{number(person.event_registrations_count ?? 0)}</td></tr>)}</tbody></table></div>}</>
+}
+
+function ReportsPage() {
+  const { data, loading, error, reload } = useData<Report>('/reports')
+  return <><PageHeader title="گزارش‌ها" subtitle="آمار واقعی ثبت‌شده در پایگاه‌داده"><button className="secondary-button" onClick={() => void reload()}><RefreshCw size={16} /></button></PageHeader>{loading ? <Loading /> : error ? <Empty title="گزارش در دسترس نیست" detail={error} /> : <><section className="metric-grid report-metrics">{Object.entries(data?.totals ?? {}).map(([label, value]) => <article className="metric-card blue" key={label}><p>{({ events: 'رویدادها', registrations: 'ثبت‌نام‌ها', attendance: 'حضورها', vouchers: 'بن‌ها', redeemed_vouchers: 'بن مصرف‌شده', certificates: 'گواهی‌ها' } as Record<string, string>)[label]}</p><strong>{number(value)}</strong></article>)}</section>{data?.events.length === 0 ? <Empty title="داده‌ای برای گزارش نیست" detail="پس از ایجاد رویداد و ثبت فعالیت، گزارش‌ها به‌روزرسانی می‌شوند." /> : <div className="panel table-wrap"><table><thead><tr><th>رویداد</th><th>ثبت‌نام</th><th>حضور</th><th>بن مصرف‌شده</th><th>گواهی</th></tr></thead><tbody>{data?.events.map((event) => <tr key={event.id}><td>{event.title}</td><td>{number(event.registrations_count)}</td><td>{number(event.attendance_count)}</td><td>{number(event.redeemed_vouchers_count)}/{number(event.vouchers_count)}</td><td>{number(event.certificates_count)}</td></tr>)}</tbody></table></div>}</>}</>
+}
+
+function ProfilePage({ user, onUpdated }: { user: User; onUpdated: (user: User) => void }) {
+  const [busy, setBusy] = useState(false); const [message, setMessage] = useState('')
+  async function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setBusy(true); setMessage(''); try { const updated = await api<User>('/profile', { method: 'PUT', body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget).entries())) }); onUpdated(updated); setMessage('اطلاعات با موفقیت ذخیره شد.') } catch (reason) { setMessage(getError(reason)) } finally { setBusy(false) } }
+  return <><PageHeader title="حساب کاربری" subtitle="اطلاعات شخصی و نقش فعلی شما" /><form className="panel profile-form" onSubmit={submit}><div className="role-pill"><ShieldCheck size={18} /> {roleTitle(user.role)}</div><label>نام و نام خانوادگی<input name="name" defaultValue={user.name} required /></label><label>ایمیل<input value={user.email} disabled /></label><label>شماره همراه<input name="phone" defaultValue={user.phone ?? ''} /></label><label>دانشگاه یا سازمان<input name="organization" defaultValue={user.organization ?? ''} /></label>{message && <p className={message.includes('موفقیت') ? 'notice success wide' : 'notice error wide'}>{message}</p>}<button className="primary-button" disabled={busy}>{busy ? 'در حال ذخیره…' : 'ذخیره تغییرات'}</button></form></>
+}
+
+type Page = 'dashboard' | 'events' | 'registrations' | 'people' | 'vouchers' | 'attendance' | 'certificates' | 'reports' | 'profile'
+const navigation: Array<{ page: Page; label: string; icon: LucideIcon; staff?: boolean }> = [
+  { page: 'dashboard', label: 'نمای کلی', icon: LayoutDashboard }, { page: 'events', label: 'رویدادها و نشست‌ها', icon: CalendarDays }, { page: 'registrations', label: 'ثبت‌نام‌ها', icon: ClipboardCheck }, { page: 'people', label: 'کاربران', icon: Users, staff: true }, { page: 'vouchers', label: 'بن‌ها و خدمات', icon: Ticket }, { page: 'attendance', label: 'حضور و غیاب', icon: ScanLine, staff: true }, { page: 'certificates', label: 'گواهی‌ها', icon: BadgeCheck }, { page: 'reports', label: 'گزارش‌ها', icon: ChartNoAxesCombined, staff: true }, { page: 'profile', label: 'حساب کاربری', icon: UserRound },
 ]
 
-const metricIcons: Record<Tone, LucideIcon> = {
-  blue: Users,
-  green: CheckCircle2,
-  amber: Presentation,
-  violet: Ticket,
-}
-
-function number(value: number): string {
-  return new Intl.NumberFormat('fa-IR').format(value)
-}
-
-function time(value: string): string {
-  return new Intl.DateTimeFormat('fa-IR', { hour: '2-digit', minute: '2-digit' }).format(new Date(value))
-}
-
-function sessionKind(type: string): string {
-  return ({ keynote: 'سخنرانی', workshop: 'کارگاه', panel: 'پنل', networking: 'شبکه‌سازی' })[type] ?? 'نشست'
+function Shell({ session, onSessionChange }: { session: Session; onSessionChange: (session: Session | null) => void }) {
+  const [page, setPage] = useState<Page>(() => (location.hash.slice(1) as Page) || 'dashboard')
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const staff = session.user.role === 'admin' || session.user.role === 'organizer'
+  useEffect(() => { const update = () => setPage((location.hash.slice(1) as Page) || 'dashboard'); addEventListener('hashchange', update); return () => removeEventListener('hashchange', update) }, [])
+  function navigate(next: Page) { location.hash = next; setPage(next); setMobileOpen(false) }
+  async function logout() { try { await api('/auth/logout', { method: 'POST' }) } finally { localStorage.removeItem('eventhub_token'); onSessionChange(null) } }
+  const current = useMemo(() => { const props = { user: session.user }; if (page === 'events') return <EventsPage {...props} />; if (page === 'registrations') return <RegistrationsPage {...props} />; if (page === 'people' && staff) return <PeoplePage {...props} />; if (page === 'vouchers') return <VouchersPage {...props} />; if (page === 'attendance' && staff) return <AttendancePage />; if (page === 'certificates') return <CertificatesPage {...props} />; if (page === 'reports' && staff) return <ReportsPage />; if (page === 'profile') return <ProfilePage user={session.user} onUpdated={(user) => onSessionChange({ ...session, user })} />; return <DashboardPage {...props} /> }, [page, session, staff, onSessionChange])
+  return <main className="app-shell"><button className="mobile-menu" onClick={() => setMobileOpen(!mobileOpen)} aria-label="باز کردن منو"><Menu size={21} /></button><aside className={`sidebar ${mobileOpen ? 'open' : ''}`}><div className="brand"><div className="brand-mark"><Sparkles size={21} /></div><div><strong>فَرا رویداد</strong><span>مدیریت رویداد علمی</span></div></div><div className="profile-card"><div className="profile-avatar">{session.user.name.slice(0, 1)}</div><div><b>{session.user.name}</b><span>{roleTitle(session.user.role)}</span></div></div><nav>{navigation.filter((item) => !item.staff || staff).map(({ page: target, label, icon: Icon }) => <button key={target} className={`nav-item ${page === target ? 'active' : ''}`} onClick={() => navigate(target)}><Icon size={18} />{label}</button>)}</nav><button className="logout" onClick={() => void logout()}><LogOut size={18} /> خروج از حساب</button></aside><section className="workspace"><header className="topbar"><span className="topbar-title">{navigation.find((item) => item.page === page)?.label ?? 'نمای کلی'}</span><span className="topbar-user"><UserRound size={17} /> {session.user.name}</span></header><div className="content">{current}</div></section></main>
 }
 
 export default function App() {
-  const [dashboard, setDashboard] = useState<DashboardData>(sampleDashboard)
-  const [activePage, setActivePage] = useState('نمای کلی')
-  const [status, setStatus] = useState('در حال بارگذاری اطلاعات رویداد')
-
-  useEffect(() => {
-    const controller = new AbortController()
-
-    fetch('/api/dashboard', { signal: controller.signal })
-      .then((response) => {
-        if (!response.ok) throw new Error('API unavailable')
-        return response.json() as Promise<DashboardData>
-      })
-      .then((data) => {
-        setDashboard(data)
-        setStatus('داده‌ها با سامانه رویداد همگام است')
-      })
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === 'AbortError') return
-        setStatus('نمایش نسخهٔ نمایشی تا راه‌اندازی API')
-      })
-
-    return () => controller.abort()
-  }, [])
-
-  const notify = (message: string) => setStatus(message)
-
-  return (
-    <main className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-mark"><Sparkles size={21} strokeWidth={2.4} /></div>
-          <div><strong>فَرا رویداد</strong><span>مدیریت رویداد علمی</span></div>
-        </div>
-
-        <div className="event-switcher">
-          <div className="event-avatar">ع</div>
-          <div><b>همایش آینده علم</b><span>رویداد فعال</span></div>
-          <ChevronDown size={16} />
-        </div>
-
-        <nav aria-label="منوی اصلی">
-          <p className="nav-caption">مدیریت رویداد</p>
-          {navigation.map(({ label, icon: Icon }) => (
-            <button key={label} type="button" className={`nav-item ${activePage === label ? 'active' : ''}`} onClick={() => { setActivePage(label); notify(`${label} انتخاب شد`) }}>
-              <Icon size={19} /><span>{label}</span>
-            </button>
-          ))}
-        </nav>
-
-        <div className="sidebar-bottom">
-          <button type="button" className="help-link" onClick={() => notify('مرکز راهنما به‌زودی در دسترس است')}><CircleHelp size={18} /> راهنما و پشتیبانی</button>
-          <div className="profile">
-            <div className="profile-avatar">س</div>
-            <div><b>دکتر سارا فولادی</b><span>دبیر رویداد</span></div>
-            <MoreHorizontal size={18} />
-          </div>
-        </div>
-      </aside>
-
-      <section className="workspace">
-        <header className="topbar">
-          <div className="mobile-brand"><Sparkles size={18} /> فَرا رویداد</div>
-          <div className="topbar-actions">
-            <button type="button" className="icon-button" aria-label="اعلان‌ها" onClick={() => notify('اعلان جدیدی ندارید')}><Bell size={20} /><i /></button>
-            <div className="topbar-divider" />
-            <div className="date-chip"><CalendarDays size={18} /> ۱۵ و ۱۶ مهر ۱۴۰۵</div>
-          </div>
-        </header>
-
-        <div className="content">
-          <section className="hero-row">
-            <div>
-              <p className="eyebrow">{activePage}</p>
-              <h1>صبح بخیر، دکتر فولادی <span>👋</span></h1>
-              <p className="subtitle">نمایی سریع از وضعیت «{dashboard.event.title}»</p>
-            </div>
-            <button type="button" className="primary-button" onClick={() => notify('فرم ایجاد نشست آماده است')}><CalendarDays size={19} /> ایجاد نشست جدید</button>
-          </section>
-
-          <div className="sync-line"><span className="live-dot" />{status}</div>
-
-          <section className="metric-grid" aria-label="شاخص‌های کلیدی">
-            {dashboard.metrics.map((metric) => {
-              const Icon = metricIcons[metric.tone]
-              return <article className={`metric-card ${metric.tone}`} key={metric.label}>
-                <div className="metric-icon"><Icon size={22} /></div>
-                <p>{metric.label}</p>
-                <strong>{number(metric.value)}{metric.label === 'ظرفیت کارگاه‌ها' ? '٪' : ''}</strong>
-                <span>{metric.detail}</span>
-              </article>
-            })}
-          </section>
-
-          <section className="main-grid">
-            <article className="panel sessions-panel">
-              <div className="panel-heading">
-                <div><h2>نشست‌ها و کارگاه‌های پیش‌رو</h2><p>برنامهٔ رویداد و وضعیت ظرفیت</p></div>
-                <button className="text-button" type="button" onClick={() => notify('فهرست کامل نشست‌ها باز شد')}>مشاهده همه <ArrowUpLeft size={16} /></button>
-              </div>
-              <div className="session-list">
-                {dashboard.sessions.slice(0, 4).map((session) => {
-                  const fill = Math.min(100, Math.round((session.registered_count / session.capacity) * 100))
-                  return <div className="session-row" key={session.id}>
-                    <div className="time-block"><b>{time(session.starts_at)}</b><span>{time(session.ends_at)}</span></div>
-                    <div className="session-divider" />
-                    <div className="session-info"><div><span className="session-tag">{sessionKind(session.type)}</span><h3>{session.title}</h3></div><p><UserRound size={14} /> {session.instructor_name ?? 'دبیرخانه رویداد'} <span>•</span> {session.room ?? 'تعیین نشده'}</p></div>
-                    <div className="seat-info"><b>{number(session.registered_count)}<small> / {number(session.capacity)}</small></b><div className="progress"><i style={{ width: `${fill}%` }} /></div><span>ظرفیت تکمیل‌شده</span></div>
-                  </div>
-                })}
-              </div>
-            </article>
-
-            <div className="side-stack">
-              <article className="panel attendance-card">
-                <div className="attendance-icon"><QrCode size={26} /></div>
-                <div><span>عملیات سریع</span><h2>ثبت حضور شرکت‌کننده</h2><p>کد ورود یا QR را اسکن کنید.</p></div>
-                <button type="button" onClick={() => notify('اسکنر حضور و غیاب فعال شد')}><ScanLine size={18} /> شروع اسکن</button>
-              </article>
-
-              <article className="panel voucher-panel">
-                <div className="panel-heading compact"><div><h2>گردش بن هوشمند</h2><p>آخرین وضعیت بن‌های خدماتی</p></div><Ticket size={22} /></div>
-                <div className="voucher-list">
-                  {dashboard.vouchers.slice(0, 3).map((voucher) => <div key={voucher.id} className="voucher-row"><div className="voucher-icon"><Ticket size={17} /></div><div><b>{voucher.title}</b><span>{voucher.code}</span></div><em className={voucher.status === 'redeemed' ? 'redeemed' : ''}>{voucher.status === 'redeemed' ? 'مصرف شد' : 'فعال'}</em></div>)}
-                </div>
-              </article>
-            </div>
-          </section>
-
-          <section className="bottom-grid">
-            <article className="panel certificate-panel">
-              <div className="panel-heading compact"><div><h2>مرکز گواهی‌ها</h2><p>صدور و پیگیری گواهی‌های رویداد</p></div><Award size={22} /></div>
-              <div className="certificate-content"><div className="certificate-seal"><Award size={30} /></div><div><h3>{number(dashboard.certificates.length)} گواهی در جریان</h3><p>گواهی حضور، کارگاه، ارائه و سخنرانی به‌صورت خودکار مدیریت می‌شوند.</p></div><button type="button" className="outline-button" onClick={() => notify('فهرست گواهی‌ها باز شد')}><Download size={16} /> مرکز گواهی</button></div>
-            </article>
-            <article className="notices">
-              {dashboard.notices.map((notice) => <div key={notice.title} className={`notice ${notice.tone}`}><Clock3 size={19} /><div><b>{notice.title}</b><p>{notice.body}</p></div></div>)}
-            </article>
-          </section>
-        </div>
-      </section>
-    </main>
-  )
+  const [session, setSession] = useState<Session | null>(null)
+  const [checking, setChecking] = useState(true)
+  useEffect(() => { const token = localStorage.getItem('eventhub_token'); if (!token) { setChecking(false); return } api<User>('/profile').then((user) => setSession({ token, user })).catch(() => localStorage.removeItem('eventhub_token')).finally(() => setChecking(false)) }, [])
+  if (checking) return <main className="auth-screen"><Loading /></main>
+  return session ? <Shell session={session} onSessionChange={setSession} /> : <AuthScreen onAuthenticated={setSession} />
 }
